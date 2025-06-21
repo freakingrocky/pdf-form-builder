@@ -12,7 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Type, ChevronDown, Circle, Table, Download, Settings, Trash2, Plus, Minus, GripVertical } from "lucide-react"
-import { PDFDocument } from "pdf-lib"
+import { PDFDocument, StandardFonts } from "pdf-lib"
 
 interface FormField {
   id: string
@@ -156,6 +156,7 @@ export default function FormBuilder() {
     try {
       // Create a new PDF document
       const pdfDoc = await PDFDocument.create()
+      const helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica)
       const page = pdfDoc.addPage([612, 792])
       const { width, height } = page.getSize()
 
@@ -209,7 +210,7 @@ export default function FormBuilder() {
               textField.setMaxLength(500)
 
               // Force field appearance
-              textField.defaultUpdateAppearances()
+              textField.defaultUpdateAppearances(helveticaFont)
 
               yPosition -= 45
               break
@@ -228,7 +229,7 @@ export default function FormBuilder() {
                 // Add options
                 dropdown.addOptions(field.options)
                 dropdown.setFontSize(12)
-                dropdown.defaultUpdateAppearances()
+                dropdown.defaultUpdateAppearances(helveticaFont)
 
                 yPosition -= 45
               }
@@ -292,7 +293,7 @@ export default function FormBuilder() {
                     cellField.setFontSize(9)
                     cellField.enableMultiline(false)
                     cellField.setMaxLength(100)
-                    cellField.defaultUpdateAppearances()
+                    cellField.defaultUpdateAppearances(helveticaFont)
                   })
                   yPosition -= 25
                 })
@@ -311,15 +312,7 @@ export default function FormBuilder() {
       // Update all form field appearances
       const formFields = form.getFields()
       console.log(`Created ${formFields.length} form fields`)
-
-      formFields.forEach((field, index) => {
-        try {
-          field.defaultUpdateAppearances()
-          console.log(`Updated appearance for field ${index + 1}: ${field.getName()}`)
-        } catch (e) {
-          console.warn(`Could not update appearance for field: ${field.getName()}`, e)
-        }
-      })
+      form.updateFieldAppearances(helveticaFont)
 
       // Save PDF with form
       const pdfBytes = await pdfDoc.save({
