@@ -6,13 +6,24 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Type, ChevronDown, Circle, Table, Download, Settings, Trash2, Plus, Minus, GripVertical } from "lucide-react"
-import { PDFDocument, StandardFonts } from "pdf-lib"
+import {
+  PDFDocument,
+  StandardFonts,
+  PDFName,
+  PDFHexString,
+} from "pdf-lib"
 
 interface FormField {
   id: string
@@ -24,11 +35,23 @@ interface FormField {
   rows?: number
   columns?: string[]
   tableData?: string[][]
+  visibility?: VisibilityCondition
+  validation?: ValidationRule
 }
 
 interface DragItem {
   type: "input" | "select" | "radio" | "table"
   label: string
+}
+
+interface VisibilityCondition {
+  fieldId: string
+  value: string
+}
+
+interface ValidationRule {
+  minLength?: number
+  maxLength?: number
 }
 
 const fieldTypes: DragItem[] = [
@@ -46,6 +69,19 @@ export default function FormBuilder() {
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
   const generateId = () => Math.random().toString(36).substr(2, 9)
+
+  const getFieldName = (field: FormField) => {
+    switch (field.type) {
+      case "input":
+        return `text_${field.id}`
+      case "select":
+        return `select_${field.id}`
+      case "radio":
+        return `radio_${field.id}`
+      default:
+        return `table_${field.id}`
+    }
+  }
 
   const handleDragStart = (type: string) => {
     setDraggedType(type)
@@ -75,6 +111,8 @@ export default function FormBuilder() {
             ]
           : undefined,
       rows: draggedType === "table" ? 2 : undefined,
+      visibility: undefined,
+      validation: undefined,
     }
 
     setFields((prev) => [...prev, newField])
@@ -308,6 +346,51 @@ export default function FormBuilder() {
 
         yPosition -= 15
       }
+
+      // Add Save button
+      const saveBtn = form.createButton('save_button')
+      saveBtn.addToPage('Save', page, { x: 50, y: 40, width: 100, height: 25 })
+      saveBtn.defaultUpdateAppearances(helveticaFont)
+
+      // Build JavaScript for validation and visibility
+      let visibilityJS = ''
+      let validationJS = ''
+
+      fields.forEach((f) => {
+        if (f.visibility) {
+          const target = getFieldName(f)
+          const sourceField = fields.find((sf) => sf.id === f.visibility!.fieldId)
+          if (sourceField) {
+            const sourceName = getFieldName(sourceField)
+            visibilityJS +=
+              `var src=this.getField('${sourceName}');var tgt=this.getField('${target}');if(src&&tgt){if(src.value=='${f.visibility!.value}')tgt.display=display.visible;else tgt.display=display.hidden;}`
+          }
+        }
+        if (f.validation) {
+          const name = getFieldName(f)
+          const conds: string[] = []
+          if (f.validation.minLength !== undefined) {
+            conds.push(`val.length < ${f.validation.minLength}`)
+          }
+          if (f.validation.maxLength !== undefined) {
+            conds.push(`val.length > ${f.validation.maxLength}`)
+          }
+          if (conds.length > 0) {
+            validationJS +=
+              `var val=this.getField('${name}').value;if(${conds.join('||')}){app.alert('${f.label} length invalid');return;}`
+          }
+        }
+      })
+
+      const fullScript = `function onSave(){${visibilityJS}${validationJS}app.alert('Saved');}`
+      pdfDoc.addJavaScript('onSave', fullScript)
+      const jsAction = pdfDoc.context.obj({
+        Type: 'Action',
+        S: 'JavaScript',
+        JS: PDFHexString.fromText('onSave();'),
+      })
+      const saveWidget = saveBtn.acroField.getWidgets()[0]
+      saveWidget.dict.set(PDFName.of('A'), jsAction)
 
       // Update all form field appearances
       const formFields = form.getFields()
@@ -575,6 +658,99 @@ export default function FormBuilder() {
                       </div>
                     </div>
                   )}
+
+                  {/* Visibility Condition */}
+                  <div>
+                    <Label className="mb-1 block">Visibility</Label>
+                    <div className="space-y-2">
+                      <Select
+                        value={selectedFieldData.visibility?.fieldId || ""}
+                        onValueChange={(val) =>
+                          updateField(selectedFieldData.id, {
+                            visibility: {
+                              fieldId: val,
+                              value: selectedFieldData.visibility?.value || "",
+                            },
+                          })
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Field" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fields
+                            .filter((f) => f.id !== selectedFieldData.id)
+                            .map((f) => (
+                              <SelectItem key={f.id} value={f.id}>
+                                {f.label}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        placeholder="Value"
+                        value={selectedFieldData.visibility?.value || ""}
+                        onChange={(e) =>
+                          updateField(selectedFieldData.id, {
+                            visibility: {
+                              fieldId:
+                                selectedFieldData.visibility?.fieldId || "",
+                              value: e.target.value,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  {/* Validation */}
+                  <div>
+                    <Label className="mb-1 block">Validation</Label>
+                    <div className="flex space-x-2">
+                      <Input
+                        type="number"
+                        placeholder="Min"
+                        className="w-20"
+                        value={
+                          selectedFieldData.validation?.minLength !== undefined
+                            ? selectedFieldData.validation.minLength
+                            : ""
+                        }
+                        onChange={(e) =>
+                          updateField(selectedFieldData.id, {
+                            validation: {
+                              minLength: e.target.value
+                                ? parseInt(e.target.value)
+                                : undefined,
+                              maxLength:
+                                selectedFieldData.validation?.maxLength,
+                            },
+                          })
+                        }
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Max"
+                        className="w-20"
+                        value={
+                          selectedFieldData.validation?.maxLength !== undefined
+                            ? selectedFieldData.validation.maxLength
+                            : ""
+                        }
+                        onChange={(e) =>
+                          updateField(selectedFieldData.id, {
+                            validation: {
+                              minLength:
+                                selectedFieldData.validation?.minLength,
+                              maxLength: e.target.value
+                                ? parseInt(e.target.value)
+                                : undefined,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
               </ScrollArea>
             </div>
